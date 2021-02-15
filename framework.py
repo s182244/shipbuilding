@@ -121,108 +121,19 @@ class Model():
         X = self.X_selector.transform(idX)
         return self.estimator.predict(X)
     
+    def predict_steps(self, idX):
+        n_steps = len(idX)
+        X_prev = self.X_selector.transform(idX)[:1]
+        y_pred = self.estimator.predict(X_prev).reshape(1, -1)
+        M = y_pred.shape[1]
+        for n in range(n_steps-1):
+            X_prev = np.concatenate((y_pred[-1:], X_prev[:,:-M]), axis=1)
+            y_pred = np.concatenate((y_pred, self.estimator.predict(X_prev).reshape(1, -1)), axis=0)
+        return y_pred
+    
     def score(self, idX, y=None, sample_weight=None):
         y_pred = self.predict(idX)
         #print(y_pred.shape)
         y_true = self.y_selector.transform(idX)
         #print(y_true.shape)
         return r2_score(y_true, y_pred, sample_weight=sample_weight)
-
-
-class Splitter(): 
-    """
-    Sklearn-style Time Series cross-validator, 
-    inspired from `sklearn.model_selection.TimeSeriesSplit`
-    
-    Note: when passed, tt_split over-rules max_train_size and/or test_size
-    """
-
-    def __init__(self, n_splits=5, max_train_size=None, test_size=None, tt_split=None): 
-        self.n_splits = n_splits
-        self.max_train_size = max_train_size
-        self.test_size = test_size
-        self.tt_split = tt_split 
-
-    def split(self, X=None, y=None, groups=None):       
-        n_samples = len(X)
-        n_splits = self.n_splits
-        if self.tt_split:
-            self.max_train_size = int(self.tt_split*n_samples/n_splits)
-            self.test_size = int((1-self.tt_split)*n_samples/n_splits)   
-        n_folds = n_splits + 1
-        if n_folds > n_samples:
-            raise ValueError(
-                ("Cannot have number of folds ={0} greater"
-                 " than the number of samples: {1}.").format(n_folds,
-                                                             n_samples))
-        indices = np.arange(n_samples)
-        
-        ######### Main changes made here
-        step = n_samples // (n_folds-1)
-        if self.test_size and self.test_size < step:
-            test_size = self.test_size
-            test_starts = range((n_samples % step) + (step - test_size ), n_samples, step) #HERE
-        else:
-            test_size = (n_samples // n_folds)
-            test_starts = range(test_size + n_samples % n_folds, n_samples, test_size)
-        #########
-        
-        for test_start in test_starts:
-            if self.max_train_size and self.max_train_size < test_start:
-                yield (indices[test_start - self.max_train_size:test_start],
-                       indices[test_start:test_start + test_size])
-            else:
-                yield (indices[:test_start],
-                       indices[test_start:test_start + test_size])
-        
-    def get_n_splits(self, X=None, y=None, groups=None): #For compatibility
-        return self.n_splits
-    
-    
-class CrossValidation():
-    """Grid search cross validation for Model wrapper
-    """
-    def __init__(self, model, grid, splitter, **params):
-        self.model = model
-        self.grid = ParameterGrid(grid)
-        self.splitter = splitter
-        self.params = params
-    def fit(self, idX, y=None):
-        self.cvres = {'param_'+k:[] for k in self.grid[0].keys()}
-        for n in range(self.splitter.get_n_splits()):
-            self.cvres['split'+str(n)+'_train_score'] = []
-            self.cvres['split'+str(n)+'_test_score'] = []
-
-        for params in self.grid:
-            for k in params.keys():
-                self.cvres['param_'+k].append(params[k])
-            self.model.set_params(**params)
-            n=0
-            for train_split, test_split in self.splitter.split(idX):
-                train_idX, test_idX = idX[train_split].copy(), idX[test_split].copy()
-                self.model.fit(train_idX)
-                self.cvres['split'+str(n)+'_train_score'].append(self.model.score(train_idX))
-                self.cvres['split'+str(n)+'_test_score'].append(self.model.score(test_idX))
-                n+=1
-
-        self.res = pd.DataFrame(self.cvres)
-        self.res['mean_train_score'] = self.res[[c for c in self.res.columns if 'train_score' in c]].mean(axis=1)
-        self.res['mean_test_score'] = self.res[[c for c in self.res.columns if 'test_score' in c]].mean(axis=1)
-               
-    def save_results(self, name, path=None, timestamp=True):
-        if timestamp:
-            name = Timestamp()+name
-        if path is not None:
-            name = path+name
-            
-        self.res.to_csv(name + '.csv', index=False)
-        params = {}
-        params['splitter'] = {
-            'n_splits' : self.splitter.n_splits,
-            'max_train_size' : self.splitter.max_train_size,
-            'test_size' : self.splitter.test_size,
-            'tt_split' : self.splitter.tt_split            
-        }
-        
-        with open(name+'Params.json', 'w') as fp:
-            json.dump(params, fp)

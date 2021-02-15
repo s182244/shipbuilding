@@ -26,7 +26,12 @@ import seaborn as sns
 from sklearn.metrics import r2_score
 from sklearn.model_selection import ParameterGrid
 
+#Indicators index
+indicators = pd.read_csv('data/indicators.csv')
+indict = indicators.set_index('ID').to_dict(orient='index')
+
 #Set plot parameters
+path_fig = '../report/figures/'
 plt.style.use('grayscale') #grayscale ggplot seaborn-darkgrid seaborn-colorblind bmh
 plt.rcParams['figure.figsize'] = (15, 5)
 plt.rcParams['axes.labelsize'] = 15
@@ -107,6 +112,52 @@ def plot_pred(y_pred, idX_pred, ID, y_true=None,  idX_true=None, show=True, save
     if show:
         plt.show()
     plt.close()
+    
+def get_scores(predictions, names, model_type):
+    scores = pd.DataFrame(data=['MAE', 'RAE', 'RMSE', 'R2'], columns=['Measures'])
+    for name in names:
+        mae, rae, rmse, r2 = compute_error(predictions['y_true'].values, predictions[name].values)
+        scores[name] = [mae, rae, rmse, r2]
+    global path_fig
+    scores.to_csv('scores/'+model_type+'-scores.csv', index=False)
+    df_to_tabular(scores, path_fig+'forecasting/'+model_type+'-scores.tex', digits=2, align=None)
+    return scores
+    
+def df_to_tabular(df, name, digits=None, align=None):
+    N, M = len(df), len(df.columns)
+    sep = ' & '
+    specialc = ['%', '#', '$', '°']
+    if digits is None:
+        digits = 2
+    if align is None:
+        align =  M*'c'
+    with open(name, 'w') as file:
+        file.write('\\begin{tabular}{' + align + '}\n')
+        file.write('\\hlineB{2.5}\n')
+        header = ''
+        for c in df.columns:
+            header += c + sep
+        header = header[:-len(sep)]
+        header += '\\\ \n'
+        for c in specialc:
+            header = header.replace(c, '\\'+c)
+        file.write(header)
+        file.write('\\hline\n')
+        for key, s in df.iterrows():
+            #line = key + ' & %.2f & %.2f'%tuple(v for v in s) + '\\\ \n'
+            line = ''
+            for value in s:
+                if type(value) == int or type(value) == float:
+                    value = np.round(value, digits)
+                line += str(value) + sep
+            line = line[:-len(sep)]
+            line += '\\\ \n'
+            line = line.replace('nan', ' ')
+            for c in specialc:
+                line = line.replace(c, '\\'+ c)
+            file.write(line)
+        file.write('\\hlineB{2.5}\n')
+        file.write('\\end{tabular}')
 
 
 ####################################################################################
